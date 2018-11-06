@@ -1,0 +1,452 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="X-UA-Compatible" content="IE=edge" charset=utf-8" />
+	<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+	<style type="text/css">
+	body, html,#allmap {width: 100%;height: 93%;overflow: hidden;margin:0;font-family:"微软雅黑";}
+	</style>
+	<script type="text/javascript" src="http://api.map.baidu.com/api?v=2.0&ak=racDsR1eyQB4veZgKMKRP4K2mziRRCXI"></script>
+	<title>地图展示</title>
+</head>
+<body>
+	<div id="allmap"></div>
+	<input type="text" value="" id="textBox">
+	<input type="file" id="excel-file" /> 
+	<button type="button" onclick="coord()"> 可视区坐标 </button>
+	<button type="button" onclick="Click()"> 选取点坐标 </button>
+	<button type="button" onclick="ClearAll()"> 清除全部标记 </button> <br/>
+	<select id="selection" onclick="setR()">
+		<option value ="0">搜索半径(m)</option>
+		<option value ="300">300</option>
+		<option value ="500">500</option>
+		<option value ="1000">1000</option>
+	<select>
+	<button type="button" onclick="SearchInCircle()"> 开始地点选择 </button>
+	<button type="button" onclick="Pause()"> 结束地点选择 </button>
+	<button type="button" onclick="Finish()" > 完成本路线 </button>
+	<button type="button" onclick="ClearSearch()" > 清除所有地点标记 </button>
+	<!--button type="button" onclick="saveToExcel()" > 保存至excel </button >
+	<a type="button" id="down_button" onclick="Capture()"> 截图 </a-->
+    <script type="text/javascript" src="js-xlsx-gh-pages/xlsx.full.min.js"></script>   
+	<script src="https://cdn.bootcss.com/html2canvas/0.5.0-beta4/html2canvas.min.js"></script>  
+	<script src="https://cdn.bootcss.com/html2canvas/0.5.0-beta4/html2canvas.js"></script>
+	<!--加载鼠标绘制工具-->
+	<script type="text/javascript" src="http://api.map.baidu.com/library/DrawingManager/1.4/src/DrawingManager_min.js"></script>
+	<link rel="stylesheet" href="http://api.map.baidu.com/library/DrawingManager/1.4/src/DrawingManager_min.css" />
+</body>
+</html>
+<script type="text/javascript">
+	
+	var map = new BMap.Map("allmap", {enableMapClick:false});    // 创建Map实例
+	map.centerAndZoom(new BMap.Point(123.425756,41.803841), 13);  // 初始化地图,设置中心点坐标和地图缩放级别
+	map.enableScrollWheelZoom(); //启用滚轮缩放地图
+	
+	//添加缩放控件
+	map.addControl(new BMap.NavigationControl({anchor: BMAP_ANCHOR_BOTTOM_RIGHT,type: BMAP_NAVIGATION_CONTROL_ZOOM}));
+	map.addControl(new BMap.ScaleControl()); 
+	var size = new BMap.Size(10, 20);
+	map.addControl(new BMap.CityListControl({
+		anchor: BMAP_ANCHOR_TOP_LEFT,
+		offset: size,
+	}));
+	
+	//添加地图类型
+	var mapType1 = new BMap.MapTypeControl({mapTypes: [BMAP_NORMAL_MAP,BMAP_HYBRID_MAP]});
+	map.addControl(mapType1);          //2D图，卫星图
+		
+	//记录上传excel次数，清除全部标注时清零
+	var ind = -1;
+	
+	//圆形搜索半径
+	var radius = 0;
+	var circles = [];
+	function setR(){
+		radius = document.getElementById("selection").value;
+		for(var i=0;i<circles.length;i++){
+			circles[i].setRadius(radius);
+		}
+	}
+	
+	//记录excel中数据
+	var items = [];//保存所有数据
+	var numOfElement = [];//记录每个excel中数据数量
+	function addItem(d){		
+		items = items.concat(d);
+		numOfElement[ind] = d.length;
+	}
+	
+	//从excel中获得点的名称
+	function getName(point){
+		for(var i=0;i<items.length;i++){
+			var pt = new BMap.Point(items[i].lng,items[i].lat);
+			if(pt.equals(point)){
+				return items[i].name;
+			}
+		}
+	}
+
+	//储存从excel中读取的点组
+	var ptCs = [];
+	function saveToptCs(ptC){
+		ptCs = ptCs.concat(ptC);
+	}
+	
+	//添加点
+	function addCollection(){
+		if (document.createElement('canvas').getContext) {
+			//储存海量点的位置
+			var pts = [];		
+			var i = 0;//计算在items中开始的位置
+			for(var j=0;j<numOfElement.length-1;j++){
+				i += numOfElement[j];
+			}
+			for(;i<items.length;i++){
+				var point = new BMap.Point(items[i].lng,items[i].lat);
+				pts.push(point);
+			}
+			//设置颜色
+			var options = {
+					size: BMAP_POINT_SIZE_SMALL,
+					shape: BMAP_POINT_SHAPE_RHOMBUS,
+					color: 'hsl('+(ind*40)+20+',95%,50%)',
+			}
+			//创建海量点
+			var pointCollection = new BMap.PointCollection(pts, options); 
+			saveToptCs(pointCollection);
+			pointCollection.addEventListener("click",function(e){
+				var content = "";
+				for(var i=0;i<ptCs.length;i++){
+					if (pointCollection == ptCs[i]){
+						content = tags[i] + '<br/>';
+					}
+				}
+				var opts = {
+				  width : 200,     // 信息窗口宽度
+				  height: 70,     // 信息窗口高度
+				  title : getName(e.point), // 信息窗口标题
+				}
+				content += e.point.lat + "," + e.point.lng;
+				var infoWindow = new BMap.InfoWindow(content,opts);
+				map.openInfoWindow(infoWindow,e.point);
+			});
+			//添加覆盖物
+			map.addOverlay(pointCollection);
+			pointCollection.disableMassClear();	
+			
+		} else {
+			alert('请在chrome、safari、IE8+、firefox以上浏览器查看本示例');
+		}
+	}
+	
+	//获得视图左下角及右下角坐标
+	function coord(){
+		var bs = map.getBounds();   //获取可视区域
+		var bssw = bs.getSouthWest();   //可视区域左下角
+		var bsne = bs.getNorthEast();   //可视区域右上角
+		alert("左下角坐标：" + bssw.lat + "," +  bssw.lng +"\n右上角坐标：" + bsne.lat + "," + bsne.lng);
+	}
+	
+	//可选区域坐标
+	function DisplayCoord(){
+		//实例化鼠标绘制工具
+		var drawingManager = new BMapLib.DrawingManager(map, {
+			isOpen: true, //是否开启绘制模式
+			enableDrawingTool: true, //是否显示工具栏
+		});  
+		map.removeOverlay(drawingManager);
+	}
+	
+	//选取点坐标
+	function Click(){
+		function getCoor(e){
+			map.removeEventListener("click",getCoor);
+			var marker = new BMap.Marker(e.point);
+			map.addOverlay(marker);
+			marker.addEventListener("click",function(e){
+				var opts = {
+				  width : 200,     // 信息窗口宽度
+				  height: 30,     // 信息窗口高度
+				  title: e.point.lat + " , " + e.point.lng
+				}
+				var infoWindow = new BMap.InfoWindow("",opts);
+				map.openInfoWindow(infoWindow,e.point);
+			});
+			marker.enableDragging();
+			marker.addEventListener("dragend",function(e){
+				marker.addEventListener("click",function(e){
+					var opts = {
+					  width : 200,     // 信息窗口宽度
+					  height: 30,     // 信息窗口高度
+					  title: e.point.lat + "," + e.point.lng
+					}
+					var infoWindow = new BMap.InfoWindow("",opts);
+					map.openInfoWindow(infoWindow,e.point);
+				});
+			});
+		}
+		map.addEventListener("click",getCoor);
+		//map.removeEventListener("click",getCoor);
+	}
+	
+	//搜索条件
+	var tags =[];
+	/*function saveTag(){
+		var myselect = document.getElemengById("selection");
+		var index=myselect.selectedIndex ; 
+		tag = muselect.options[index].text;
+	}*/
+	
+	//储存搜索点
+	var markers = []; 
+	function savedPoints(m){
+		markers.push(m);
+	}
+	
+	//创建信息窗口
+	function Window(pt){	
+		var opts = {
+			width : 150,     // 信息窗口宽度
+			height: 100+ind*50,     // 信息窗口高度			
+		}
+		var content = "经纬度:<br/>"+ pt.lat + "," + pt.lng +"<br/>";
+		var data = DataInCircle(pt);
+		for(var i=0;i<ind+1;i++){
+			content += tags[i] + "数量: "+ data[i] + "<br/>" 
+						+tags[i]+"覆盖率: "+(100*data[i]/numOfElement[i]).toFixed(3)+"%"+"<br/>";
+		}
+		var infoWindow = new BMap.InfoWindow(content,opts);
+		return infoWindow;
+	}
+	
+	//圆形搜索示意
+	function add(e){
+		//创建点
+		var marker = new BMap.Marker(e.point);
+		var label = new BMap.Label(markers.length+1,{offset:new BMap.Size(15,-10)});//创建点上的标注
+		marker.setLabel(label);
+		savedPoints(marker);//保存点组
+		
+		if(markers.length>1){
+			Route(markers[markers.length-2].getPosition(),markers[markers.length-1].getPosition(),poly.length);
+		}
+		
+		//添加覆盖物 
+		var Circle = new BMap.Circle(e.point,radius,{fillColor:"blue", strokeWeight:1, fillOpacity:0.3, strokeOpacity:0.2}); //创建圆
+		map.addOverlay(Circle);//添加圆
+		circles.push(Circle);
+		
+		//添加信息框
+		marker.addEventListener("click",function(){
+			map.openInfoWindow(Window(marker.getPosition()),e.point);
+		});        
+		map.addOverlay(marker);
+		
+		//搜索
+		marker.enableDragging(); //可拖拽
+		
+		//拖拽后
+		marker.addEventListener("dragend",function(e){
+			var circle = new BMap.Circle(e.point,radius,{fillColor:"blue", strokeWeight:1, fillOpacity:0.3, strokeOpacity:0.2}); //创建圆
+			map.addOverlay(circle);//添加圆
+			
+			//处理折线
+			for(var i=0;i<markers.length;i++){
+				if(markers[i].getLabel().content == marker.getLabel().content){
+					marker.setPosition(e.point);//重置点的坐标
+					markers[i] = marker;//保存
+					if(i!=0){
+						map.removeOverlay(poly[i-1]);
+						Route(markers[i-1].getPosition(),markers[i].getPosition(),i-1);
+					}
+					if(i!=markers.length-1) {
+						map.removeOverlay(poly[i]);
+						Route(markers[i].getPosition(),markers[i+1].getPosition(),i);
+					}
+				}
+			}
+			
+			//取消之前的圆
+			map.removeOverlay(Circle);
+			for(var i=0;i<circles.length;i++){
+				if(circles[i].getCenter().equals(Circle.getCenter())){
+					circles[i] = circle;
+				}
+			}
+			marker.addEventListener("dragstart",function(e){
+				map.removeOverlay(circle);
+			});
+			
+			//更新信息框信息
+			marker.addEventListener("click",function(e){
+				map.openInfoWindow(Window(e.point),e.point);
+			});
+		});
+	}
+	function SearchInCircle(){
+		map.removeEventListener("click", add);
+		map.addEventListener("click",add);
+	}
+	
+	//圆形搜索数据
+	function DataInCircle(pt){
+		var data = [];
+		var currentTag = 0;
+		for(var i=0;i<ind+1;i++){
+			data[i] = 0;
+			if(i!=0) currentTag +=numOfElement[i-1];
+			for(var j=0;j<numOfElement[i];j++){
+				pt1  = new BMap.Point(items[currentTag+j].lng,items[currentTag+j].lat);
+				if(map.getDistance(pt,pt1)<radius){
+					data[i] = data[i]+1;
+				}
+			}
+		}
+		return data;
+	}
+	
+	//取消圆形搜索覆盖物
+	function ClearSearch(){
+		map.clearOverlays();
+		markers = [];
+		poly = [];
+		circles = [];
+		map.removeEventListener("click", add);
+	}
+	
+	//取消所有覆盖物
+	function ClearAll(){
+		for(var i=0;i<ptCs.length;i++){
+			ptCs[i].clear();
+		}
+		ClearSearch();
+		ind = -1;
+		ptCs = [];
+		items = [];
+		numOfElement = [];
+		tags=[];
+	}
+	
+	//截图
+	function Capture(){
+		 $(function() {  
+			html2canvas($("#allmap"), {   allowTaint : false,
+				onrendered: function(canvas) {  
+					$('#down_button').attr('href', canvas.toDataURL());  
+					$('#down_button').attr('download', 'myjobdeer.png');  
+					//$('#down_button').css('display','inline-block');  
+					var html_canvas = canvas.toDataURL();  
+					$.post('', {   
+						order_id: 1,  
+						type_id: 2,  
+						html_canvas: html_canvas  
+					}, function(json) {}, 'json');   
+				}   
+			});  
+		});         
+	}
+	
+	//路线规划
+	function Route(p1,p2,n){
+		var driving = new BMap.DrivingRoute(map, {onSearchComplete: function(results){
+			if (driving.getStatus() == BMAP_STATUS_SUCCESS){
+				var plan = driving.getResults().getPlan(0);
+				var pts= plan.getRoute(0).getPath();    
+				var polyline = new BMap.Polyline(pts); 
+				polyline.setStrokeColor("red");
+				savedRoutes(polyline,n);
+				map.addOverlay(polyline); 
+			}
+			else
+				alert("搜索路线失败，请重试");
+				return;
+        }});
+		driving.search(p1,p2);
+	}
+	
+	//储存路线
+	var poly = [];
+	function savedRoutes(po,n){
+		poly[n] = po;
+	}
+	
+	//保存规划路线
+	function save(){
+		
+	
+	}
+	
+	//暂停地点选择
+	function Pause(){
+		map.removeEventListener("click", add);
+	}
+	
+	//规划下一路线
+	function Finish(){
+		markers = [];
+		poly = [];
+		circles = [];
+		map.removeEventListener("click", add);
+		save();
+	}
+	
+	//保存excel名称及检查重复文件
+	function check(file){
+		//读取excel名称
+		var tag = "";
+		console.log(file.name);
+		for(var i=0;i<file.name.length;i++){
+			if(file.name[i]=='.') 
+				break;
+			else
+				tag += file.name[i];
+		}
+		for(var i=0;i<tags.length;i++){
+			if(tags[i] == tag){
+				alert("请不要重复上传文档！");
+				return true;
+			}
+		}
+		tags = tags.concat(tag);
+	}
+	
+	//从excel中读取数据
+	document.getElementById('excel-file').addEventListener('change',read_excel);
+	function read_excel(e){  
+		
+		var files = e.target.files; 
+		if(check(files[0])) return;
+		ind += files.length;
+		var fileReader = new FileReader();  
+		fileReader.onload = function data(ev){  
+			try {  
+				var data = ev.target.result,  
+				//以二进制流方式读取得到整份excel表格对象  
+				workbook = XLSX.read(data, {type : 'binary'}), item=[];
+			} catch (e) {  
+				alert('文件类型不正确!');  
+				return;  
+			}  
+			  
+			//表格的表格范围，可用于判断表头数量是否正确  
+			var fromTo = '';  
+		  
+			//遍历每张表读取  
+			for (var sheet in workbook.Sheets) {  
+				if (workbook.Sheets.hasOwnProperty(sheet)) {  
+					fromTo = workbook.Sheets[sheet]['!ref'];  
+					console.log(fromTo);  
+					item = item.concat(XLSX.utils.sheet_to_json(workbook.Sheets[sheet]));  
+					break;  //如果只取第一张表，就取消注释这行  
+				}  
+			}  
+			addItem(item);
+			addCollection();
+		};
+		//以二进制方式打开文件  
+		
+		fileReader.readAsBinaryString(files[0]); 
+		
+	}
+	
+</script>
